@@ -1,0 +1,19 @@
+stages:
+- stage: __default
+  jobs:
+  - job: Job_1
+    displayName: Agent job 1
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: 6d15af64-176c-496d-b583-fd2ae21d4df4@1
+      inputs:
+        repository: self
+    - task: CopyFiles@2
+      displayName: 'Copy Files to: $(build.artifactstagingdirectory)/Terraform'
+      inputs:
+        SourceFolder: Infra
+        TargetFolder: $(build.artifactstagingdirectory)/Terraform
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: drop'
+

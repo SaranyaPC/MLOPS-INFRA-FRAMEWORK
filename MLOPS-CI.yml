@@ -1,0 +1,127 @@
+# Variable Group 'MLVariableGroup' was defined in the Variables tab
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - checkout: self
+  - task: UsePythonVersion@0
+    displayName: Use Python 3.8
+    inputs:
+      versionSpec: 3.8
+  - task: Bash@3
+    displayName: Install python dependencies
+    inputs:
+      filePath: environment_setup/install-requirements.sh
+  - task: Bash@3
+    displayName: Install pytest Requirements
+    enabled: False
+    inputs:
+      targetType: inline
+      script: >
+        pip install pytest
+
+        pip install numpy
+
+        pip install pandas
+
+        sudo apt install python3-testresources
+
+        python -m pip install --upgrade pip
+
+        pip install --upgrade setuptools
+  - task: Bash@3
+    displayName: Run Pytest
+    enabled: False
+    inputs:
+      targetType: inline
+      script: >
+        pytest /home/vsts/work/r1/a/_ML-2/tests/unit/data_test2.py --doctest-modules --junitxml=junit/test-results.xml
+  - task: PublishTestResults@2
+    displayName: Publish Test Results **/test-*.xml
+    enabled: False
+    inputs:
+      testResultsFiles: '**/test-*.xml'
+  - task: AzureCLI@2
+    displayName: Azure CLI ML Installation
+    inputs:
+      connectedServiceNameARM: aa6a7c4e-0d0c-4d05-a4a3-9ee35bb48dfc
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az extension add -n azure-cli-ml
+  - task: AzureCLI@2
+    displayName: Create/Use Resource group
+    enabled: False
+    inputs:
+      connectedServiceNameARM: c2c4ee31-5cf1-4030-8059-56d1a034a8ce
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: >
+        az group create --name $(ml.resourceGroup) --location eastus
+  - task: AzureCLI@2
+    displayName: Create/Use ML Workspace
+    inputs:
+      connectedServiceNameARM: aa6a7c4e-0d0c-4d05-a4a3-9ee35bb48dfc
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: >-
+        pip install --upgrade azureml-core
+
+        az ml workspace create -g $(ml.resourceGroup) -w $(ml.workspace) -l $(ml.region) --exist-ok --yes
+  - task: AzureCLI@2
+    displayName: Create/Use Compute Target
+    inputs:
+      connectedServiceNameARM: aa6a7c4e-0d0c-4d05-a4a3-9ee35bb48dfc
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: 'az ml computetarget create amlcompute -g $(ml.resourceGroup) -w $(ml.workspace) -n $(ml.computeName) -s $(ml.computeVMSize) --min-nodes $(ml.computeMinNodes) --max-nodes $(ml.computeMaxNodes)  --idle-seconds-before-scaledown $(ml.computeIdleSecs) '
+  - task: AzureCLI@2
+    displayName: Update to data to default blob
+    inputs:
+      connectedServiceNameARM: aa6a7c4e-0d0c-4d05-a4a3-9ee35bb48dfc
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az ml datastore upload -w $(ml.workspace) -g $(ml.resourceGroup) -n $(az ml datastore show-default -w $(ml.workspace) -g $(ml.resourceGroup) --query name -o tsv) -p data -u irisdata
+  - task: Bash@3
+    displayName: Create Model folder
+    inputs:
+      targetType: inline
+      script: >
+        mkdir metadata && mkdir models
+  - task: AzureCLI@2
+    displayName: IRIS Training
+    inputs:
+      connectedServiceNameARM: aa6a7c4e-0d0c-4d05-a4a3-9ee35bb48dfc
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az ml run submit-script -g $(ml.resourceGroup) -w $(ml.workspace) -e $(ml.experimentName) --ct $(ml.computeName) -c iris_training --source-directory . --path environment_setup -t ./metadata/run.json iris_training.py --container_name irisdata --input_csv Iris.csv --model_path ./models/iris_model.pkl --artifact_loc ./outputs/models/ --dataset_name iris_ds --dataset_desc "IRIS Data Set"
+  - task: AzureCLI@2
+    displayName: Register Model in Model Regiestry
+    inputs:
+      connectedServiceNameARM: aa6a7c4e-0d0c-4d05-a4a3-9ee35bb48dfc
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az ml model register -g $(ml.resourceGroup) -w $(ml.workspace) -n IRIS --asset-path outputs/models/ -d "IRIS Decision Tree Classifier" --tag "model"="Decision Tree"  --model-framework Custom -f ./metadata/run.json -t metadata/model.json
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(Build.ArtifactStagingDirectory)'
+    inputs:
+      SourceFolder: $(Build.SourcesDirectory)
+      Contents: >-
+        **/metadata/*
+
+        **/environment_setup/*
+
+        **/deployment/*
+
+        **/inference/*
+
+        **/tests/smoke/*
+
+        **/outputs/prediction.csv
+      TargetFolder: $(Build.ArtifactStagingDirectory)
+  - task: PublishPipelineArtifact@1
+    displayName: Publish Pipeline Artifact
+    inputs:
+      artifactName: ml_artifacts
+...
